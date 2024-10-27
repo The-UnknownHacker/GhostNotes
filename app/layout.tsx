@@ -8,7 +8,7 @@ import Providers from "./providers";
 const title =
   "Notepad - An AI powered notepad.";
 const description =
-  "An AI powered notepad. Start typing to get started. Use / for commands and ++ for autocompletion.";
+  "An AI powered notepad. Start typing to get started. Use / for commands and ++ for autocompletion or -- for summarization.";
 
 export const metadata: Metadata = {
   title,
