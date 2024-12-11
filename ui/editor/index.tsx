@@ -5,6 +5,8 @@ import { useDebouncedCallback } from "use-debounce";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { useEffect, useRef, useState } from "react";
 import va from "@vercel/analytics";
+import { supabase } from '@/lib/supabaseClient';
+import { useRouter } from "next/navigation";
 
 import { EditorBubbleMenu } from "@/ui/editor/components";
 import { getPrevText } from "@/lib/editor";
@@ -14,26 +16,40 @@ import DEFAULT_EDITOR_CONTENT from "@/ui/editor/default-content";
 import useLocalStorage from "@/lib/hooks/use-local-storage";
 
 export default function Editor() {
+  const router = useRouter();
   const [content, setContent] = useLocalStorage(
     "content",
     DEFAULT_EDITOR_CONTENT,
   );
   const [saveStatus, setSaveStatus] = useState("Saved");
   const [hydrated, setHydrated] = useState(false);
+  const [user, setUser] = useState(null);
 
-  const debouncedUpdates = useDebouncedCallback(async ({ editor }) => {
-    const json = editor.getJSON();
-    setSaveStatus("Saving...");
-    setContent(json);
-    // Simulate a delay in saving.
-    setTimeout(() => {
-      setSaveStatus("Saved");
-    }, 500);
-  }, 750);
+  const loadSavedNotes = async (userId: string) => {
+    const { data: notes, error } = await supabase
+      .from('notes')
+      .select('content')
+      .eq('user_id', userId)
+      .limit(1)
+      .single();
+
+    if (error) {
+      console.error('Error loading notes:', error);
+      return;
+    }
+
+    if (notes) {
+      setContent(notes.content);
+      if (editor) {
+        editor.commands.setContent(notes.content);
+      }
+    }
+  };
 
   const editor = useEditor({
     extensions: TiptapExtensions,
     editorProps: TiptapEditorProps,
+    content: content,
     onUpdate: (e) => {
       setSaveStatus("Unsaved");
       const selection = e.editor.state.selection;
@@ -42,7 +58,6 @@ export default function Editor() {
       });
 
       if (lastTwo === "++" && !isLoading) {
-        // Handle autocompletion
         e.editor.commands.deleteRange({
           from: selection.from - 2,
           to: selection.from,
@@ -50,7 +65,6 @@ export default function Editor() {
         complete(getPrevText(e.editor, { chars: 5000 }));
         va.track("Autocomplete Shortcut Used");
       } else if (lastTwo === "--" && !isLoading) {
-        // Handle summarization
         e.editor.commands.deleteRange({
           from: selection.from - 2,
           to: selection.from,
@@ -63,6 +77,99 @@ export default function Editor() {
     },
     autofocus: "end",
   });
+
+  // Load saved notes when editor is ready
+  useEffect(() => {
+    if (editor && user) {
+      loadSavedNotes(user.id);
+    }
+  }, [editor, user]);
+
+  // Handle authentication
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error('Error fetching session:', error);
+        router.push('/login');
+      } else if (session) {
+        setUser(session.user);
+      } else {
+        router.push('/login');
+      }
+    };
+
+    checkSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session) {
+          setUser(session.user);
+        } else {
+          setUser(null);
+          router.push('/login');
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [router]);
+
+  const saveNoteToSupabase = async (content) => {
+    if (!user) {
+      console.error('User not logged in');
+      return;
+    }
+
+    // First try to update existing note
+    const { data: existingNotes, error: fetchError } = await supabase
+      .from('notes')
+      .select('id')
+      .eq('user_id', user.id)
+      .limit(1);
+
+    if (fetchError) {
+      console.error('Error fetching notes:', fetchError);
+      return;
+    }
+
+    if (existingNotes && existingNotes.length > 0) {
+      // Update existing note
+      const { data, error } = await supabase
+        .from('notes')
+        .update({ content })
+        .eq('id', existingNotes[0].id)
+        .select();
+
+      if (error) console.error('Error updating note:', error);
+      else console.log('Note updated:', data);
+    } else {
+      // Insert new note
+      const { data, error } = await supabase
+        .from('notes')
+        .insert([{ 
+          user_id: user.id, 
+          content 
+        }])
+        .select();
+
+      if (error) console.error('Error saving note:', error);
+      else console.log('Note saved:', data);
+    }
+  };
+
+  const debouncedUpdates = useDebouncedCallback(async ({ editor }) => {
+    const json = editor.getJSON();
+    setSaveStatus("Saving...");
+    setContent(json);
+    await saveNoteToSupabase(json);
+    // Simulate a delay in saving.
+    setTimeout(() => {
+      setSaveStatus("Saved");
+    }, 500);
+  }, 750);
 
   const { complete, completion, isLoading, stop } = useCompletion({
     id: "notepad-autocomplete",

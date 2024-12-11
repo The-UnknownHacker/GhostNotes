@@ -7,12 +7,12 @@ const nextConfig = {
     return [
       {
         source: "/github",
-        destination: "https://github.com/timmo001/notepad",
+        destination: "https://github.com/The-UnknownHacker/GhostNotes",
         permanent: true,
       },
       {
         source: "/feedback",
-        destination: "https://github.com/timmo001/notepad/issues",
+        destination: "https://github.com/The-UnknownHacker/GhostNotes/issues",
         permanent: true,
       }
     ];
